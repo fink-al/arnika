@@ -239,7 +239,6 @@ mainloop:
 						log.Println(err.Error())
 					}
 				}
-
 			}
 		case roleMaster:
 			ticker := time.NewTicker(interval)
