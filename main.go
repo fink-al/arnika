@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/arnika-project/arnika/kdf"
 	"github.com/arnika-project/arnika/kms"
 	wg "github.com/arnika-project/arnika/wireguard"
+	"github.com/oklog/ulid/v2"
 )
 
 var (
@@ -23,6 +26,12 @@ var (
 	Version string
 	// allows to overwrite app name on build.
 	APPName string
+)
+
+const (
+	initPrefix = "init:"
+	roleMaster = "master"
+	roleBackup = "backup"
 )
 
 func handleServerConnection(c net.Conn, result chan string) {
@@ -181,41 +190,72 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to parse config: %v", err)
 	}
+
+	entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
+	ms := ulid.Timestamp(time.Now())
+	myID, err := ulid.New(ms, entropy)
+	if err != nil {
+		log.Fatalf("Failed to generate execution id: %s", err.Error())
+	}
+	peerID := ""
+
 	interval := time.Duration(cfg.Interval)
 	done := make(chan bool)
-	skip := make(chan bool)
 	result := make(chan string)
 	kmsAuth := kms.NewClientCertificateAuth(cfg.Certificate, cfg.PrivateKey, cfg.CACertificate)
 	kmsServer := kms.NewKMSServer(cfg.KMSURL, int(cfg.KMSHTTPTimeout.Seconds()), kmsAuth)
+	go tcpServer(cfg.ListenAddress, result, done)
+	go sendHandshake(myID.String(), cfg.ServerAddress)
+
+mainloop:
 	for {
-		go tcpServer(cfg.ListenAddress, result, done)
-		go func() {
+		role := IfThenElse(myID.String() > peerID, roleMaster, roleBackup)
+		if err != nil {
+			log.Println(err.Error())
+		}
+		switch role {
+		case roleBackup:
+		backuploop:
 			for {
-				r := <-result
-				go func() {
-					skip <- true
-				}()
-				log.Println("<-- BACKUP: received key_id " + r)
-				// to stuff with key
-				key, err := kmsServer.GetKeyByID(r)
-				if err != nil {
-					log.Println(err.Error())
-					time.Sleep(time.Millisecond * 100)
-					continue
+				select {
+				case <-done:
+					break mainloop
+				case r := <-result:
+					if strings.HasPrefix(r, initPrefix) {
+						peerID = strings.TrimPrefix(r, initPrefix)
+						log.Println("--> new peer. reconfiguring roles ...")
+						break backuploop
+					}
+					log.Println("<-- BACKUP: received key_id " + r)
+					// to stuff with key
+					key, err := kmsServer.GetKeyByID(r)
+					if err != nil {
+						log.Println(err.Error())
+						time.Sleep(time.Millisecond * 100)
+						continue
+					}
+					err = setPSK(key.GetKey(), cfg, "<-- BACKUP:")
+					if err != nil {
+						log.Println(err.Error())
+					}
 				}
-				err = setPSK(key.GetKey(), cfg, "<-- BACKUP:")
-				if err != nil {
-					log.Println(err.Error())
-				}
+
 			}
-		}()
-		go func() {
+		case roleMaster:
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			i := 20
+		masterloop:
 			for {
 				select {
-				case <-skip:
+				case <-done:
+					break mainloop
+				case message := <-result:
+					if strings.HasPrefix(message, initPrefix) {
+						peerID = strings.TrimPrefix(message, initPrefix)
+						log.Println("--> new peer. reconfiguring roles ...")
+						break masterloop
+					}
 				default:
 					// get key_id and send
 					log.Printf("--> MASTER: fetch key_id from %s\n", cfg.KMSURL)
@@ -238,10 +278,21 @@ func main() {
 						log.Println(err.Error())
 					}
 				}
-				<-ticker.C
+				select {
+				case <-done:
+					break mainloop
+				case <-ticker.C:
+				}
 			}
-		}()
-		<-done
-		break
+		}
 	}
+}
+
+func sendHandshake(myID string, peerAddress string) {
+	err := fmt.Errorf("init")
+	for err != nil {
+		err = tcpClient(peerAddress, initPrefix+myID)
+		time.Sleep(time.Millisecond * 100)
+	}
+	log.Println("handshake sent to " + peerAddress)
 }
