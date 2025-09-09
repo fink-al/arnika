@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -159,6 +160,7 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	versionLong := flag.Bool("version", false, "print version and exit")
 	versionShort := flag.Bool("v", false, "alias for version")
+	generatemlkemKey := flag.Bool("genkey", false, "generate a new MLKEM private key (decapsulation key; base64 encoded) and exit")
 	flag.Parse()
 	if *versionShort || *versionLong {
 		fmt.Printf("%s version %s\n", APPName, Version)
@@ -170,6 +172,15 @@ func main() {
 		flag.Usage()
 		os.Exit(0)
 	}
+	if SafeDeref(generatemlkemKey) {
+		key, err := mlkem.GenerateKey768()
+		if err != nil {
+			log.Panicln(err.Error())
+		}
+		fmt.Printf("%s\n", base64.StdEncoding.EncodeToString(key.Bytes()))
+		os.Exit(0)
+	}
+
 	cfg, err := config.Parse()
 	if err != nil {
 		log.Fatalf("Failed to parse config: %v", err)
@@ -205,6 +216,11 @@ mainloop:
 				case r := <-result:
 					if strings.HasPrefix(r, pubKeyExchangePrefix) {
 						peerPubKeyBase64 = strings.TrimPrefix(r, pubKeyExchangePrefix)
+						if !slices.Contains(cfg.TrustedKeys, peerPubKeyBase64) {
+							log.Printf("<-- BACKUP: untrusted peer: %s\n", peerPubKeyBase64)
+							peerPubKeyBase64 = ""
+							break backuploop
+						}
 						log.Println("--> new peer. reconfiguring roles ...")
 						break backuploop
 					} else if strings.HasPrefix(r, cipherTextPrefix) {
@@ -240,6 +256,10 @@ mainloop:
 				case message := <-result:
 					if strings.HasPrefix(message, pubKeyExchangePrefix) {
 						peerPubKeyBase64 = strings.TrimPrefix(message, pubKeyExchangePrefix)
+						if !slices.Contains(cfg.TrustedKeys, peerPubKeyBase64) {
+							log.Printf("--> MASTER: untrusted peer: %s\n", peerPubKeyBase64)
+							continue
+						}
 						log.Println("--> new peer. reconfiguring roles ...")
 						break masterloop
 					}

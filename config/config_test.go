@@ -1,30 +1,14 @@
 package config
 
 import (
+	"crypto/mlkem"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"reflect"
 	"testing"
 	"time"
 )
-
-func TestUsePQC(t *testing.T) {
-	// Test case 1: Config with PQCPSKFile set
-	c := &Config{PQCPSKFile: "psk_file"}
-	result := c.UsePQC()
-	expected := true
-	if result != expected {
-		t.Errorf("Expected %t, but got %t", expected, result)
-	}
-
-	// Test case 2: Config with PQCPSKFile not set
-	c = &Config{}
-	result = c.UsePQC()
-	expected = false
-	if result != expected {
-		t.Errorf("Expected %t, but got %t", expected, result)
-	}
-}
 
 func TestParse(t *testing.T) {
 	// Test case 1: Missing environment variable
@@ -42,6 +26,11 @@ func TestParse(t *testing.T) {
 	t.Setenv("KMS_URL", "https://example.com")
 	t.Setenv("WIREGUARD_INTERFACE", "wg0")
 	t.Setenv("WIREGUARD_PEER_PUBLIC_KEY", "H9adDtDHXhVzSI4QMScbftvQM49wGjmBT1g6dgynsHc=")
+	mlkemkey := "uJmOkKZRO3jTwkpAu3mwhbOT76SFWJaX5oPjwntJarQBzh4s3xJRNw/qouxhyoqOwxnpOaO4q/3jZhEoVovP8w=="
+	t.Setenv("PRIVATE_MLKEM_KEY", mlkemkey)
+
+	bt, _ := base64.StdEncoding.DecodeString(mlkemkey)
+	deckey, _ := mlkem.NewDecapsulationKey768(bt)
 
 	// Test case 2: All environment variables present
 	expectedConfig := &Config{
@@ -55,7 +44,7 @@ func TestParse(t *testing.T) {
 		KMSHTTPTimeout:         time.Second * 10, // Default value for KMSHTTPTimeout
 		WireGuardInterface:     "wg0",
 		WireguardPeerPublicKey: "H9adDtDHXhVzSI4QMScbftvQM49wGjmBT1g6dgynsHc=",
-		PQCPSKFile:             "", // Default value for PQCPSKFile
+		PrivateMLKEMKey:        deckey, // Will be set after parsing
 	}
 	result, err := Parse()
 	if err != nil {
@@ -73,13 +62,6 @@ func TestParse(t *testing.T) {
 		t.Error("Expected an error for interval parsing failure")
 	}
 	t.Setenv("INTERVAL", "1m")
-
-	// Test case 4: PQC keyfile check
-	t.Setenv("PQC_PSK_FILE", "non_existent_file")
-	_, err = Parse()
-	if err == nil {
-		t.Error("Expected an error for non-existent PQC keyfile")
-	}
 }
 
 func TestGetEnvOrDefault(t *testing.T) {

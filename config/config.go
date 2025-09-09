@@ -2,8 +2,10 @@ package config
 
 import (
 	"crypto/mlkem"
+	"encoding/base64"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -19,8 +21,8 @@ type Config struct {
 	Interval               time.Duration              // INTERVAL, Interval between key updates
 	WireGuardInterface     string                     // WIREGUARD_INTERFACE, Name of the WireGuard interface to configure
 	WireguardPeerPublicKey string                     // WIREGUARD_PEER_PUBLIC_KEY, Public key of the WireGuard peer
-	PrivateMLKEMKey        *mlkem.DecapsulationKey768 // TOOD load from env var
-	// TODO: pubKey trust store for peers
+	PrivateMLKEMKey        *mlkem.DecapsulationKey768 // PRIVATE_MLKEM_KEY, Base64-encoded MLKEM-768 private key (decapsulation key)
+	TrustedKeys            []string                   // TRUSTED_KEYS, List of trusted public keys for the WireGuard peers (separated by commas)
 }
 
 // Parse parses the configuration values from environment variables and returns a Config pointer.
@@ -63,11 +65,23 @@ func Parse() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	mk, err := mlkem.GenerateKey768()
+	mk, err := getEnv("PRIVATE_MLKEM_KEY")
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate MLKEM key: %w", err)
+		return nil, err
 	}
-	config.PrivateMLKEMKey = mk
+	decodedKey, err := base64.StdEncoding.DecodeString(mk)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode PRIVATE_MLKEM_KEY from base64: %w", err)
+	}
+	decKey, err := mlkem.NewDecapsulationKey768(decodedKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse PRIVATE_MLKEM_KEY: %w", err)
+	}
+	config.PrivateMLKEMKey = decKey
+	trustedKeys := getEnvOrDefault("TRUSTED_KEYS", "")
+	if trustedKeys != "" {
+		config.TrustedKeys = strings.Split(trustedKeys, ",")
+	}
 	return config, nil
 }
 
