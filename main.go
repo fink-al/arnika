@@ -177,7 +177,8 @@ func main() {
 		if err != nil {
 			log.Panicln(err.Error())
 		}
-		fmt.Printf("%s\n", base64.StdEncoding.EncodeToString(key.Bytes()))
+		fmt.Printf("PRIVATE_MLKEM_KEY=%s\n", base64.StdEncoding.EncodeToString(key.Bytes()))
+		fmt.Printf("TRUSTED_KEYS=%s\n", base64.StdEncoding.EncodeToString(key.EncapsulationKey().Bytes()))
 		os.Exit(0)
 	}
 
