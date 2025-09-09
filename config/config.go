@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/mlkem"
 	"fmt"
 	"os"
 	"time"
@@ -8,25 +9,18 @@ import (
 
 // Config contains the configuration values for the arnika service.
 type Config struct {
-	ListenAddress          string        // LISTEN_ADDRESS, Address to listen on for incoming connections
-	ServerAddress          string        // SERVER_ADDRESS, Address of the arnika server
-	Certificate            string        // CERTIFICATE, Path to the client certificate file
-	PrivateKey             string        // PRIVATE_KEY, Path to the client key file
-	CACertificate          string        // CA_CERTIFICATE, Path to the CA certificate file
-	KMSURL                 string        // KMS_URL, URL of the KMS server
-	KMSHTTPTimeout         time.Duration // KMS_HTTP_TIMEOUT, HTTP connection timeout
-	Interval               time.Duration // INTERVAL, Interval between key updates
-	WireGuardInterface     string        // WIREGUARD_INTERFACE, Name of the WireGuard interface to configure
-	WireguardPeerPublicKey string        // WIREGUARD_PEER_PUBLIC_KEY, Public key of the WireGuard peer
-	PQCPSKFile             string        // PQC_PSK_FILE, Path to the PQC PSK file
-}
-
-// Use PQC returns a boolean indicating whether the PQC PSK file is set in the Config struct.
-//
-// No parameters.
-// Returns a boolean value indicating whether the PQC PSK file is set.
-func (c *Config) UsePQC() bool {
-	return c.PQCPSKFile != ""
+	ListenAddress          string                     // LISTEN_ADDRESS, Address to listen on for incoming connections
+	ServerAddress          string                     // SERVER_ADDRESS, Address of the arnika server
+	Certificate            string                     // CERTIFICATE, Path to the client certificate file
+	PrivateKey             string                     // PRIVATE_KEY, Path to the client key file
+	CACertificate          string                     // CA_CERTIFICATE, Path to the CA certificate file
+	KMSURL                 string                     // KMS_URL, URL of the KMS server
+	KMSHTTPTimeout         time.Duration              // KMS_HTTP_TIMEOUT, HTTP connection timeout
+	Interval               time.Duration              // INTERVAL, Interval between key updates
+	WireGuardInterface     string                     // WIREGUARD_INTERFACE, Name of the WireGuard interface to configure
+	WireguardPeerPublicKey string                     // WIREGUARD_PEER_PUBLIC_KEY, Public key of the WireGuard peer
+	PrivateMLKEMKey        *mlkem.DecapsulationKey768 // TOOD load from env var
+	// TODO: pubKey trust store for peers
 }
 
 // Parse parses the configuration values from environment variables and returns a Config pointer.
@@ -69,12 +63,11 @@ func Parse() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	config.PQCPSKFile = getEnvOrDefault("PQC_PSK_FILE", "")
-	if config.PQCPSKFile != "" {
-		if _, err := os.Stat(config.PQCPSKFile); os.IsNotExist(err) {
-			return nil, fmt.Errorf("failed to open PQC PSK file: %w", err)
-		}
+	mk, err := mlkem.GenerateKey768()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate MLKEM key: %w", err)
 	}
+	config.PrivateMLKEMKey = mk
 	return config, nil
 }
 
