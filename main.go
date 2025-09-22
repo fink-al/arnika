@@ -94,7 +94,7 @@ func main() {
 	// base64 encode
 	myPubKey := cfg.PrivateMLKEMKey.EncapsulationKey().Bytes()
 	myPubKeyBase64 := base64.StdEncoding.EncodeToString(myPubKey)
-	peerPubKeyBase64 := ""
+	peerPubKeyBase64 := "" // empty means no peer or untrusted peer
 	sharedSecret := []byte{}
 
 	interval := cfg.Interval
@@ -128,12 +128,17 @@ mainloop:
 						}
 						log.Println("--> new peer. reconfiguring roles ...")
 						break backuploop
-					} else if strings.HasPrefix(r, cipherTextPrefix) {
+					} else if strings.HasPrefix(r, cipherTextPrefix) && peerPubKeyBase64 != "" {
 						sharedSecret, err = negotiateSharedKey(cfg, r, roleBackup)
 						if err != nil {
 							log.Println(err.Error())
 						}
 						continue
+					}
+					if peerPubKeyBase64 == "" {
+						// set random string as shared secret as peers are untrusted
+						log.Println("<-- BACKUP: setting random shared secret as no trusted peer connected")
+						sharedSecret = randomString(32)
 					}
 					log.Println("<-- BACKUP: received key_id " + r)
 					// to stuff with key
@@ -163,20 +168,29 @@ mainloop:
 						peerPubKeyBase64 = strings.TrimPrefix(message, pubKeyExchangePrefix)
 						if !slices.Contains(cfg.TrustedKeys, peerPubKeyBase64) {
 							log.Printf("--> MASTER: untrusted peer: %s\n", peerPubKeyBase64)
+							peerPubKeyBase64 = ""
 							continue
 						}
 						log.Println("--> new peer. reconfiguring roles ...")
 						break masterloop
+					} else if strings.HasPrefix(message, cipherTextPrefix) && peerPubKeyBase64 == "" {
+						log.Println("--> MASTER: received unexpected ciphertext message from untrusted peer")
+						continue
 					}
 				default:
-					sharedSecret, err = negotiateSharedKey(cfg, peerPubKeyBase64, roleMaster)
-					if err != nil {
-						log.Println(err.Error())
+					if peerPubKeyBase64 != "" {
+						sharedSecret, err = negotiateSharedKey(cfg, peerPubKeyBase64, roleMaster)
+						if err != nil {
+							log.Println(err.Error())
+						}
+
+						// get key_id and send
+						log.Printf("--> MASTER: fetch key_id from %s\n", cfg.KMSURL)
+					} else {
+						// set random string as shared secret as peers are untrusted
+						log.Println("--> MASTER: setting random shared secret as no trusted peer connected")
+						sharedSecret = randomString(32)
 					}
-
-					// get key_id and send
-					log.Printf("--> MASTER: fetch key_id from %s\n", cfg.KMSURL)
-
 					key, err := kmsServer.GetNewKey()
 					if err != nil {
 						log.Println(err.Error())
@@ -190,6 +204,7 @@ mainloop:
 					if err != nil {
 						log.Println(err.Error())
 					}
+
 					err = setPSK(key.GetKey(), cfg, "--> MASTER:", sharedSecret)
 					if err != nil {
 						log.Println(err.Error())
