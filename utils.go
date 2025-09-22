@@ -19,3 +19,12 @@ func GetZero[T any]() T {
 	var result T
 	return result
 }
+
+func fibonacciRecursion(n int) int {
+	if n <= 1 {
+		return n
+	} else if n > 11 {
+		return 120
+	}
+	return fibonacciRecursion(n-1) + fibonacciRecursion(n-2)
+}

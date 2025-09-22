@@ -3,7 +3,6 @@ module github.com/arnika-project/arnika
 go 1.24
 
 require (
-	github.com/oklog/ulid/v2 v2.1.1
 	golang.org/x/crypto v0.41.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20230429144221-925a1e7659e6
 )
