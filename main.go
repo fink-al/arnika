@@ -50,6 +50,7 @@ func main() {
 	versionLong := flag.Bool("version", false, "print version and exit")
 	versionShort := flag.Bool("v", false, "alias for version")
 	generatemlkemKey := flag.Bool("genkey", false, "generate a new MLKEM private key (decapsulation key; base64 encoded) and exit")
+	showKey := flag.String("showkey", "", "show the public MLKEM key (encapsulation key; base64 encoded) for a given base64 encoded private MLKEM key and exit")
 	flag.Parse()
 	if *versionShort || *versionLong {
 		fmt.Printf("%s version %s\n", APPName, Version)
@@ -68,6 +69,20 @@ func main() {
 		}
 		fmt.Printf("PRIVATE_MLKEM_KEY=%s\n", base64.StdEncoding.EncodeToString(key.Bytes()))
 		fmt.Printf("TRUSTED_KEYS=%s\n", base64.StdEncoding.EncodeToString(key.EncapsulationKey().Bytes()))
+		os.Exit(0)
+	}
+
+	if SafeDeref(showKey) != "" {
+		privateKeyBytes, err := base64.StdEncoding.DecodeString(*showKey)
+		if err != nil {
+			log.Panicln("error decoding base64 private MLKEM key: " + err.Error())
+		}
+		privateKey, err := mlkem.NewDecapsulationKey768(privateKeyBytes)
+		if err != nil {
+			log.Panicln("error parsing private MLKEM key: " + err.Error())
+		}
+		publicKey := privateKey.EncapsulationKey()
+		fmt.Printf("TRUSTED_KEYS=%s\n", base64.StdEncoding.EncodeToString(publicKey.Bytes()))
 		os.Exit(0)
 	}
 
